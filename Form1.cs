@@ -27,6 +27,7 @@ namespace OlivettiEmulatore
 
         private string bufferInput = "";
         private bool nuovaImmissione = true;
+        private bool ultimoTastoEraCanc = false;
 
         // Gestione Zoom Vista Compatta (100%, 120%, 150%)
         private int indiceScalaCompatta = 0;
@@ -561,6 +562,10 @@ namespace OlivettiEmulatore
 
         private void Form1_KeyPress(object? sender, KeyPressEventArgs e)
         {
+            if (e.KeyChar != 'c' && e.KeyChar != 'C')
+            {
+                ultimoTastoEraCanc = false;
+            }
             if (e.KeyChar == '#')
             {
                 StampaRiferimentoDataOra();
@@ -593,8 +598,8 @@ namespace OlivettiEmulatore
                 case Keys.K:
                     testo = "TASTO K / SHIFT + K (Sconti X+10):\n\n" +
                             "• K (Sconto X):\n" +
-                            "  1° tocco: memorizza Lordo/Base (BAS)\n" +
-                            "  2° tocco: digita Netto (NET) -> calcola % sconto X (%X10)\n\n" +
+                            "  1° tocco: memorizza Lordo/Base (LOR)\n" +
+                            "  2° tocco: digita Netto (NET) -> calcola % sconto X (%+10%)\n\n" +
                             "• SHIFT + K (Lordo Inverso):\n" +
                             "  1° tocco: memorizza Netto (NET)\n" +
                             "  2° tocco: digita % sconto Y (%SC) -> calcola Lordo originario (LOR)";
@@ -976,7 +981,7 @@ namespace OlivettiEmulatore
                 if (valore <= 0) return;
 
                 baseLordoSpeciale = valore;
-                StampaNastro($"{baseLordoSpeciale:N2}", "BAS");
+                StampaNastro($"{baseLordoSpeciale:N2}", "LOR");
                 ResetPerNuovaOperazione();
             }
             else
@@ -994,7 +999,7 @@ namespace OlivettiEmulatore
                 decimal scontoArrotondato = Arrotonda(scontoX);
 
                 StampaNastro($"{netto:N2}", "NET");
-                StampaNastro($"{scontoArrotondato:N2}", "%X10");
+                StampaNastro($"{scontoArrotondato:N2}", "%+10%");
 
                 lblDisplay.Text = $"{scontoArrotondato:N2}";
                 displayValore = scontoArrotondato;
@@ -1029,7 +1034,7 @@ namespace OlivettiEmulatore
                 decimal lordo = (nettoInversoSpeciale / 0.90m) / ((100m - percentualeY) / 100m);
                 decimal lordoArrotondato = Arrotonda(lordo);
 
-                StampaNastro($"{percentualeY:N2} %", "%SC");
+                StampaNastro($"{percentualeY:N2} %", "SC+10%");
                 StampaNastro($"{lordoArrotondato:N2}", "LOR");
 
                 lblDisplay.Text = $"{lordoArrotondato:N2}";
@@ -1172,15 +1177,30 @@ namespace OlivettiEmulatore
 
         private void AzzeraInserimentoCorrente()
         {
-            bufferInput = "";
-            displayValore = 0;
-            baseLordoSpeciale = 0;
-            nettoInversoSpeciale = 0;
-            imponibileScorporo = 0;
-            lblDisplay.Text = "0";
-            nuovaImmissione = true;
-        }
+            if (ultimoTastoEraCanc)
+            {
+                // Secondo tocco consecutivo: azzera tutto e stampa lo 0 sul nastro
+                StampaNastro("0,00", "C");
 
+                displayValore = 0;
+                registroPrecedente = 0;
+                bufferInput = "";
+                nuovaImmissione = true;
+                lblDisplay.Text = "0,00";
+
+                ultimoTastoEraCanc = false;
+            }
+            else
+            {
+                // Primo tocco: azzera solo la digitazione corrente
+                bufferInput = "";
+                displayValore = 0;
+                nuovaImmissione = true;
+                lblDisplay.Text = "0,00";
+
+                ultimoTastoEraCanc = true;
+            }
+        }
         private void CalcolaRadiceQuadrata()
         {
             decimal val = OttieniValoreIngresso();
@@ -1416,33 +1436,42 @@ namespace OlivettiEmulatore
             ResetPerNuovaOperazione();
         }
 
+
         private void CalcolaScatoleIVA(bool aggiungiIVA)
         {
-            decimal baseVal = OttieniValoreIngresso();
+            // Se non si sta digitando un nuovo numero, usa il valore a display/registro
+            decimal baseVal;
+            if (string.IsNullOrWhiteSpace(bufferInput) || nuovaImmissione)
+            {
+                baseVal = displayValore != 0 ? displayValore : registroPrecedente;
+            }
+            else
+            {
+                baseVal = OttieniValoreIngresso();
+            }
+
+            if (baseVal == 0) return;
+
             decimal quotaIVA;
             decimal risultato;
 
             if (aggiungiIVA)
             {
-                // Da imponibile ad importo con IVA: Base + (Base * 22%)
                 quotaIVA = Arrotonda(baseVal * (aliquotaIVA / 100m));
                 risultato = baseVal + quotaIVA;
 
                 StampaNastro($"{baseVal:N2}", "   ");
                 StampaNastro($"{aliquotaIVA:N2} %", "TAX");
-                StampaNastro($"{quotaIVA:N2}", "+IVA");
                 StampaNastro($"{risultato:N2}", "+TAX");
             }
             else
             {
-                // Da lordo a imponibile (scorporo corretto): Lordo / 1.22
                 decimal moltiplicatore = 1.0m + (aliquotaIVA / 100m);
                 risultato = Arrotonda(baseVal / moltiplicatore);
                 quotaIVA = baseVal - risultato;
 
                 StampaNastro($"{baseVal:N2}", "LOR");
                 StampaNastro($"{aliquotaIVA:N2} %", "TAX");
-                StampaNastro($"{quotaIVA:N2}", "-IVA");
                 StampaNastro($"{risultato:N2}", "-TAX");
             }
 
@@ -1518,11 +1547,11 @@ namespace OlivettiEmulatore
                 "                   - a vuoto: stampa data e ora correnti (#D)" + nl +
                 "                   - con cifre: stampa numero di rif./codice senza sommare (#)" + nl +
                 "  K              : Ricavo Sconto X su schema (X + 10%):" + nl +
-                "                   - 1° tocco: Lordo/Base (BAS)" + nl +
-                "                   - 2° tocco: Netto (NET) -> calcola % sconto X (%X10)" + nl +
+                "                   - 1° tocco: Lordo/Base (LOR)" + nl +
+                "                   - 2° tocco: Netto (NET) -> calcola % sconto X (%+10%)" + nl +
                 "  Shift + K      : Ricavo Lordo Inverso da schema (X + 10%):" + nl +
                 "                   - 1° tocco: Netto (NET)" + nl +
-                "                   - 2° tocco: % Sconto Y (%SC) -> ricava Lordo originario (LOR)" + nl +
+                "                   - 2° tocco: % Sconto Y (+10%) -> ricava Lordo originario (LOR)" + nl +
                 "  Shift + I      : Scorporo Due Aliquote (22% e 10%):" + nl +
                 "                   - 1° tocco: Imponibile Totale (IMP)" + nl +
                 "                   - 2° tocco: Totale Lordo Fattura (LOR) ->" + nl +
